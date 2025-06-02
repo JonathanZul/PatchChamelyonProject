@@ -471,11 +471,12 @@ def main(args):
     val_custom_dataset = PatchCamelyonDataset(pcam['valid'], transform=val_test_transform)
     test_custom_dataset = PatchCamelyonDataset(pcam['test'], transform=val_test_transform)
 
-    train_dataloader = DataLoader(train_custom_dataset, batch_size=BATCH_SIZE_ARG, shuffle=True, num_workers=0,
+    NUM_WORKERS_ARG = 4  # Or make it an argparse/config option
+    train_dataloader = DataLoader(train_custom_dataset, batch_size=BATCH_SIZE_ARG, shuffle=True, num_workers=NUM_WORKERS_ARG,
                                   pin_memory=True)
-    val_dataloader = DataLoader(val_custom_dataset, batch_size=BATCH_SIZE_ARG, shuffle=False, num_workers=0,
+    val_dataloader = DataLoader(val_custom_dataset, batch_size=BATCH_SIZE_ARG, shuffle=False, num_workers=NUM_WORKERS_ARG,
                                 pin_memory=True)
-    test_dataloader = DataLoader(test_custom_dataset, batch_size=BATCH_SIZE_ARG, shuffle=False, num_workers=0,
+    test_dataloader = DataLoader(test_custom_dataset, batch_size=BATCH_SIZE_ARG, shuffle=False, num_workers=NUM_WORKERS_ARG,
                                  pin_memory=True)
 
     # --- Initial Model Training (Baseline) ---

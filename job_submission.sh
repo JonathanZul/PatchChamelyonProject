@@ -12,12 +12,19 @@
 SCRATCH="~/scratch"
 
 echo "--- PCAM Job ---"
+echo "Job ID: $SLURM_JOB_ID"
+echo "Running on host: $(hostname)"
+echo "Allocated CPUs: $SLURM_CPUS_PER_TASK"
+echo "Allocated GPU: $CUDA_VISIBLE_DEVICES"
+
 nvidia-smi
 
-export TORCH_HOME="${SCRATCH}/.cache/torch"
+CACHE_BASE_DIR="${SCRATCH}/.cache" # Or /scratch/jezul/.cache
+
+export TORCH_HOME="${CACHE_BASE_DIR}/torch"
 mkdir -p $TORCH_HOME/hub/checkpoints # Ensure it exists
 
-export HF_DATASETS_CACHE="${SCRATCH}/.cache/torch"
+export HF_DATASETS_CACHE="${CACHE_BASE_DIR}/huggingface/datasets"
 mkdir -p $HF_DATASETS_CACHE
 
 
@@ -37,6 +44,10 @@ echo "Is CUDA available to PyTorch in venv: $(python -c 'import torch; print(tor
 OUTPUT_BASE_DIR="${SCRATCH}/pcam_projectt_runs"
 RUN_SPECIFIC_DIR="${OUTPUT_BASE_DIR}/run_$(date +%Y%m%d_%H%M%S)_jobid_${SLURM_JOB_ID}"
 mkdir -p "${RUN_SPECIFIC_DIR}"
+
+echo "Output directory for this run: ${RUN_SPECIFIC_DIR}"
+
+echo "Starting Python script execution..."
 
 # run file
 srun python PCamelyon.py --hpc_mode 1 --output_dir ${RUN_SPECIFIC_DIR}
