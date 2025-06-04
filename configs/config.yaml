@@ -1,0 +1,31 @@
+# configs/config.yaml
+
+# --- General Settings ---
+hpc_mode: 0 # 0 for interactive (shows plots), 1 for HPC (saves plots)
+output_dir_base: "./experiment_outputs" # Base for all run outputs
+# run_name_suffix: "baseline_v1" # Optional suffix for the run-specific output folder
+device_preference: "cuda" # "cuda", "mps", "cpu" (script will try in this order if available)
+random_seed: 42 # reproducibility
+
+# --- Data Settings ---
+batch_size: 64
+num_workers: 4 # For DataLoader
+
+# --- Model Settings ---
+model_architecture: "resnet18"
+# model_specific_params: # if using more complex models
+#   dropout_rate: 0.2
+
+# --- Training Settings ---
+# Baseline Training
+baseline_learning_rate: 0.0001
+baseline_num_epochs: 5
+# Optimizer settings
+optimizer_type: "Adam" # Could be "SGD"
+# adam_betas: [0.9, 0.999]
+# adam_eps: 1.0e-08
+# weight_decay: 0.0
+
+# LR Experiment Phase
+lr_tuning_num_epochs: 10
+lrs_to_test: [0.001, 0.00001] # List of learning rates for experimentation

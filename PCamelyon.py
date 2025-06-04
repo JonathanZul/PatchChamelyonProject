@@ -2,6 +2,7 @@
 # coding: utf-8
 
 # Imports
+import yaml
 import logging
 import argparse
 import os
@@ -43,7 +44,7 @@ def display_or_save_plot(figure, filename_base, hpc_mode_flag, output_path_base)
     """
     Displays a Matplotlib plot or saves it to a file based on hpc_mode.
 
-    Args:
+    cli_args:
         figure (matplotlib.figure.Figure): The Matplotlib figure object to display/save.
                                            If None, uses plt.gcf() (get current figure).
         filename_base (str): The base name for the saved file (e.g., "learning_curves").
@@ -73,7 +74,7 @@ def count_labels(dataset):
 def show_samples(dataset, num_samples_per_class=5, hpc_mode_flag=False, output_path_base="."):
     """
     Efficiently displays a few random sample images from the dataset for each class.
-    Args:
+    cli_args:
         dataset (datasets.Dataset): A HuggingFace dataset split (e.g., pcam['train']).
         num_samples_per_class (int): Number of samples to show for each class.
         hpc_mode_flag (bool): If True, saves the plot. If False, shows the plot.
@@ -162,7 +163,7 @@ class PatchCamelyonDataset(Dataset):
 def train_one_epoch(model, dataloader, criterion, optimizer, device):
     """
     Train the model for one epoch.
-    Args:
+    cli_args:
         model (torch.nn.Module): The model to train.
         dataloader (DataLoader): DataLoader for the training data.
         criterion (torch.nn.Module): Loss function.
@@ -210,7 +211,7 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device):
 def validate_one_epoch(model, dataloader, criterion, device):
     """
     Validate the model for one epoch.
-    Args:
+    cli_args:
         model (torch.nn.Module): The model to validate.
         dataloader (DataLoader): DataLoader for the validation data.
         criterion (torch.nn.Module): Loss function.
@@ -249,7 +250,7 @@ def validate_one_epoch(model, dataloader, criterion, device):
 def plot_learning_curves(history, title_suffix="", hpc_mode_flag=False, output_path_base="."):
     """
     Plots the learning curves for training and validation loss and accuracy.
-    Args:
+    cli_args:
         history (dict): Dictionary containing 'train_loss', 'val_loss', 'train_acc', 'val_acc'.
         title_suffix (str): Suffix to add to the plot title.
         hpc_mode_flag (bool): If True, saves the plot instead of showing it.
@@ -286,7 +287,7 @@ def run_lr_experiment(learning_rate, num_epochs, model_architecture_fn,
     """
     Runs a training experiment for a given learning rate.
 
-    Args:
+    cli_args:
         learning_rate (float): The learning rate to use.
         num_epochs (int): Number of epochs to train.
         model_architecture (callable): A function that returns an uninitialized model (e.g., models.resnet18).
@@ -351,46 +352,116 @@ def run_lr_experiment(learning_rate, num_epochs, model_architecture_fn,
 
 
 # --- Main function ---
-def main(args):
-    global HPC_MODE
-    HPC_MODE = (args.hpc_mode == 1)  # Set global HPC_MODE based on current run's args, change later
+def main(cli_args):
+    # Load config
+    config = {}
+    if cli_args.config:
+        try:
+            with open(cli_args.config, 'r') as f:
+                config = yaml.safe_load(f)
+            logging.info(f"Loaded configuration from: {cli_args.config}") # Change to logging later
+        except FileNotFoundError:
+            logging.warning(f"WARNING: Config file {cli_args.config} not found. Using defaults and CLI args.") # Change to logging
+        except Exception as e:
+            logging.error(f"ERROR: Could not load/parse config file {cli_args.config}: {e}. Exiting.") # Change to logging
+            return
 
-    # Initial Setup
-    os.makedirs(args.output_dir, exist_ok=True)  # Ensure base output dir exists
-    warnings.filterwarnings("ignore", category=UserWarning)
-    plt.style.use('ggplot')
-    plt.rcParams['figure.figsize'] = (10, 6)
+    # Config precedence: CLI args override config settings
+    final_config = config.copy()
+
+    # Override with CLI arguments if they were provided AND are different from their argparse defaults
+    if cli_args.hpc_mode is not None and cli_args.hpc_mode != parser.get_default('hpc_mode'):
+        final_config['hpc_mode'] = cli_args.hpc_mode
+    else:  # If not set by CLI or same as default, take from config or set a script default
+        final_config.setdefault('hpc_mode', 0)
+
+    if cli_args.output_dir is not None and cli_args.output_dir != parser.get_default('output_dir'):
+        final_config['output_dir_base'] = cli_args.output_dir
+    else:
+        final_config.setdefault('output_dir_base', './experiment_outputs_default')
+
+    # Ensure essential parameters have script-level defaults if not in config or CLI
+    final_config.setdefault('device_preference', "cuda")
+    final_config.setdefault('random_seed', None)  # Or 42
+    final_config.setdefault('batch_size', 64)
+    final_config.setdefault('num_workers', 0)  # Default to 0 if not specified
+    final_config.setdefault('model_architecture', "resnet18")
+    final_config.setdefault('baseline_learning_rate', 0.0001)
+    final_config.setdefault('baseline_num_epochs', 5)
+    final_config.setdefault('optimizer_type', "Adam")
+    final_config.setdefault('lr_tuning_num_epochs', 10)
+    final_config.setdefault('lrs_to_test', [0.001, 0.00001])
+
+    # Unique output directory based on timestamp
+    current_output_dir = final_config['output_dir_base']
+    os.makedirs(current_output_dir, exist_ok=True)
 
     # Logging setup
     log_format = "%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s"
-    log_file_path = os.path.join(args.output_dir, "training_run.log")
+    log_file_path = os.path.join(current_output_dir, "run.log")
+
+    # Clear existing handlers if any (important if main is called multiple times in a session)
+    for handler in logging.root.handlers[:]:
+        logging.root.removeHandler(handler)
 
     logging.basicConfig(
-        level=logging.INFO,  # Log INFO level and above (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+        level=logging.INFO,
         format=log_format,
         handlers=[
-            logging.FileHandler(log_file_path),  # Log to a file
-            logging.StreamHandler(sys.stdout)  # Log to console (stdout)
+            logging.FileHandler(log_file_path),
+            logging.StreamHandler(sys.stdout)
         ]
     )
 
     logging.info("************************************************************")
     logging.info("           Starting PatchCamelyon Training Script           ")
     logging.info("************************************************************")
-    logging.info(f"Script arguments: {args}")
-    logging.info(f"HPC Mode: {'Enabled' if HPC_MODE else 'Disabled'}")
-    logging.info(f"Output directory for plots/models/logs: {args.output_dir}")
+    logging.info(f"Running with final configuration: {final_config}")
+    logging.info(f"Output directory for plots/models/logs: {current_output_dir}")
     logging.info(f"Log file: {log_file_path}")
 
+    # Save the final config to a YAML file for reference
+    config_save_path = os.path.join(current_output_dir, "effective_config.yaml")
+    try:
+        with open(config_save_path, 'w') as f:
+            yaml.dump(final_config, f, indent=4, sort_keys=False)
+        logging.info(f"Effective configuration saved to: {config_save_path}")
+    except Exception as e:
+        logging.error(f"Could not save effective configuration: {e}")
 
-    # Determine device
-    if torch.backends.mps.is_available() and not HPC_MODE:  # Prefer MPS for local Mac if not HPC
+    # Set random seed for reproducibility if specified
+    if final_config['random_seed'] is not None:
+        seed = final_config['random_seed']
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+        logging.info(f"Random seed set to: {seed}")
+
+    global HPC_MODE # continue to use global to access in helper functions, for now
+    HPC_MODE = final_config['hpc_mode'] == 1
+
+    # Set device preference based on config or CLI args
+    device_preference = final_config['device_preference'].lower()
+    if device_preference == "mps" and torch.backends.mps.is_available() and not HPC_MODE:
         device = torch.device("mps")
-    elif torch.cuda.is_available():
+    elif device_preference == "cuda" and torch.cuda.is_available():
         device = torch.device("cuda")
-    else:
+    elif device_preference == "cpu":    # explicitly set to CPU
         device = torch.device("cpu")
+    else:       # fallback to best available device
+        if torch.cuda.is_available():
+            device = torch.device("cuda")
+        elif torch.backends.mps.is_available() and not HPC_MODE:
+            device = torch.device("mps")
+        else:
+            device = torch.device("cpu")
     logging.info(f"Using device: {device}")
+
+
+    # Initial Setup
+    os.makedirs(current_output_dir, exist_ok=True)  # Ensure base output dir exists
+    warnings.filterwarnings("ignore", category=UserWarning)
+    plt.style.use('ggplot')
+    plt.rcParams['figure.figsize'] = (10, 6)
 
     logging.info("\n--- Phase 0 & 1: Data Loading and Preparation ---")
     try:
@@ -457,10 +528,10 @@ def main(args):
     for i, count_val in enumerate(label_counts_for_plot.values()):
         ax_dist.text(i, count_val / 2, f"{count_val}", ha='center', color='white', fontweight='bold')
     fig_dist.tight_layout()
-    display_or_save_plot(fig_dist, "label_distribution", HPC_MODE, args.output_dir)
+    display_or_save_plot(fig_dist, "label_distribution", HPC_MODE, current_output_dir)
 
     # Visualize some samples
-    show_samples(pcam['train'], num_samples_per_class=3, hpc_mode_flag=HPC_MODE, output_path_base=args.output_dir)
+    show_samples(pcam['train'], num_samples_per_class=3, hpc_mode_flag=HPC_MODE, output_path_base=current_output_dir)
 
     # Transformations
     train_transform = transforms.Compose([
@@ -474,12 +545,12 @@ def main(args):
     ])
 
     # Datasets and DataLoaders
-    BATCH_SIZE_ARG = 64  # Make this an argument later via argparse or config
+    BATCH_SIZE_ARG = final_config['batch_size']
     train_custom_dataset = PatchCamelyonDataset(pcam['train'], transform=train_transform)
     val_custom_dataset = PatchCamelyonDataset(pcam['valid'], transform=val_test_transform)
     test_custom_dataset = PatchCamelyonDataset(pcam['test'], transform=val_test_transform)
 
-    NUM_WORKERS_ARG = 4  # Or make it an argparse/config option
+    NUM_WORKERS_ARG = final_config['num_workers']
     train_dataloader = DataLoader(train_custom_dataset, batch_size=BATCH_SIZE_ARG, shuffle=True, num_workers=NUM_WORKERS_ARG,
                                   pin_memory=True)
     val_dataloader = DataLoader(val_custom_dataset, batch_size=BATCH_SIZE_ARG, shuffle=False, num_workers=NUM_WORKERS_ARG,
@@ -489,26 +560,33 @@ def main(args):
 
     # --- Initial Model Training (Baseline) ---
     logging.info("\n--- Baseline Model Training ---")
-    LEARNING_RATE_ARG = 1e-4  # Make this an argument
-    NUM_EPOCHS_ARG = 5  # Make this an argument
+    BASELINE_LEARNING_RATE_ARG = final_config['baseline_learning_rate']
+    BASELINE_NUM_EPOCHS_ARG = final_config['baseline_num_epochs']
+    OPTIMIZER_ARG = final_config['optimizer_type']
 
-    model = models.resnet18(weights=models.ResNet18_Weights.IMAGENET1K_V1)
+    model = models.get_model(final_config['model_architecture'], weights=models.ResNet18_Weights.IMAGENET1K_V1)
     num_ftrs = model.fc.in_features
     model.fc = nn.Linear(num_ftrs, 1)
     model = model.to(device)
     criterion = nn.BCEWithLogitsLoss()
-    optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE_ARG)
+    if final_config['optimizer_type'].lower() == 'adam':
+        optimizer = optim.Adam(model.parameters(), lr=BASELINE_LEARNING_RATE_ARG)   # add more parameters later if needed
+    elif final_config['optimizer_type'].lower() == 'sgd':
+        optimizer = optim.SGD(model.parameters(), lr=BASELINE_LEARNING_RATE_ARG, momentum=0.9)  # add more parameters later if needed
+    else:
+        logging.error(f"Unsupported optimizer type: {final_config['optimizer_type']}")
+        return      # Exit if unsupported optimizer
 
     history_baseline = {'train_loss': [], 'train_acc': [], 'val_loss': [], 'val_acc': []}
     best_val_accuracy_baseline = 0.0
     best_epoch_baseline = 0
 
-    model_dir = os.path.join(args.output_dir, "models")  # Centralize model saving
+    model_dir = os.path.join(current_output_dir, "models")  # Centralize model saving
     os.makedirs(model_dir, exist_ok=True)
     path_best_baseline_model = os.path.join(model_dir, "pcam_resnet18_baseline_best.pth")
 
-    logging.info(f"Starting baseline training for {NUM_EPOCHS_ARG} epochs...")
-    for epoch in range(NUM_EPOCHS_ARG):
+    logging.info(f"Starting baseline training for {BASELINE_NUM_EPOCHS_ARG} epochs...")
+    for epoch in range(BASELINE_NUM_EPOCHS_ARG):
         current_epoch_num = epoch + 1
         train_loss, train_acc = train_one_epoch(model, train_dataloader, criterion, optimizer, device)
         val_loss, val_acc = validate_one_epoch(model, val_dataloader, criterion, device)
@@ -519,7 +597,7 @@ def main(args):
         history_baseline['val_acc'].append(val_acc)
 
         logging.info(
-            f"Epoch {current_epoch_num}/{NUM_EPOCHS_ARG} Baseline | Train Loss: {train_loss:.4f}, Acc: {train_acc:.4f} | Val Loss: {val_loss:.4f}, Acc: {val_acc:.4f}")
+            f"Epoch {current_epoch_num}/{BASELINE_NUM_EPOCHS_ARG} Baseline | Train Loss: {train_loss:.4f}, Acc: {train_acc:.4f} | Val Loss: {val_loss:.4f}, Acc: {val_acc:.4f}")
 
         if val_acc > best_val_accuracy_baseline:
             best_val_accuracy_baseline = val_acc
@@ -531,7 +609,7 @@ def main(args):
     logging.info("\nFinished Baseline Training.")
     logging.info(f"Best baseline val_acc: {best_val_accuracy_baseline:.4f} at Epoch {best_epoch_baseline}")
     plot_learning_curves(history_baseline, title_suffix="Baseline", hpc_mode_flag=HPC_MODE,
-                         output_path_base=args.output_dir)
+                         output_path_base=current_output_dir)
 
     # --- Evaluation of the best baseline model on Test Set ---
     logging.info("\n--- Evaluating Best Baseline Model on Test Set ---")
@@ -589,7 +667,7 @@ def main(args):
     ax_cm_test.set_title('Confusion Matrix - Test Set (Baseline)')
     ax_cm_test.set_ylabel('Actual');
     ax_cm_test.set_xlabel('Predicted')
-    display_or_save_plot(fig_cm_test, "confusion_matrix_baseline_test", HPC_MODE, args.output_dir)
+    display_or_save_plot(fig_cm_test, "confusion_matrix_baseline_test", HPC_MODE, current_output_dir)
 
     # ROC Curve for Test Set (Baseline)
     fpr_test, tpr_test, _ = roc_curve(all_labels_test, all_probabilities_test)
@@ -603,23 +681,24 @@ def main(args):
     ax_roc_test.set_title('ROC Curve - Test Set (Baseline)');
     ax_roc_test.legend(loc="lower right");
     ax_roc_test.grid(True)
-    display_or_save_plot(fig_roc_test, "roc_curve_baseline_test", HPC_MODE, args.output_dir)
+    display_or_save_plot(fig_roc_test, "roc_curve_baseline_test", HPC_MODE, current_output_dir)
 
     # --- Phase 2: LR Experiments ---
     logging.info("\n--- Phase 2: Learning Rate Experiments ---")
-    NUM_EPOCHS_LR_TUNING_ARG = 10  # Make this an argument
-    lrs_to_test = [1e-3, 1e-5]  # Compare with your original 1e-4 (which was LEARNING_RATE_ARG)
+    NUM_EPOCHS_LR_TUNING_ARG = final_config['lr_tuning_num_epochs']
+    lrs_to_test = final_config['lrs_to_test']
+    model_architecture_fn = lambda: models.get_model(final_config['model_architecture'], weights=models.ResNet18_Weights.IMAGENET1K_V1)
 
     lr_experiment_results = {}
     # Run for original LR too for a clean comparison within this experimental setup
-    all_lrs_for_exp = [LEARNING_RATE_ARG] + lrs_to_test
+    all_lrs_for_exp = [BASELINE_LEARNING_RATE_ARG] + lrs_to_test
 
     for lr_val in all_lrs_for_exp:
         exp_name = f"lr_{lr_val:.0e}".replace('-', '_minus_')
         hist, b_val_acc, b_epoch = run_lr_experiment(
             learning_rate=lr_val,
             num_epochs=NUM_EPOCHS_LR_TUNING_ARG,
-            model_architecture_fn=models.resnet18,  # Pass the function itself
+            model_architecture_fn=model_architecture_fn,
             train_loader=train_dataloader,
             val_loader=val_dataloader,
             criterion_class=nn.BCEWithLogitsLoss,
@@ -627,7 +706,7 @@ def main(args):
             device=device,
             experiment_name=exp_name,
             hpc_mode_flag=HPC_MODE,  # Pass HPC_MODE
-            output_path_base=args.output_dir  # Pass output_dir
+            output_path_base=current_output_dir
         )
         lr_experiment_results[lr_val] = {'history': hist, 'best_val_acc': b_val_acc, 'best_epoch': b_epoch}
 
@@ -643,20 +722,26 @@ if __name__ == "__main__":
     # --- Argument Parsing ---
     parser = argparse.ArgumentParser(description="PatchCamelyon Training and Evaluation Script")
     parser.add_argument(
-        '--hpc_mode', type=int, default=0, choices=[0, 1],
+        '--config',
+        type=str,
+        default=None,  # No default config file, script can run with internal defaults or CLI cli_args
+        help="Path to YAML configuration file. CLI arguments will override config file settings."
+    )
+    parser.add_argument(
+        '--hpc_mode', type=int, default=None, choices=[0, 1],
         help="Set to 1 for HPC mode (saves plots). Default 0 (shows plots)."
     )
     parser.add_argument(
-        '--output_dir', type=str, default='./results_pcam_project',  # Changed default
+        '--output_dir', type=str, default=None,  # Changed default
         help="Base directory to save models, plots, and logs."
     )
 
     # Conditional parsing for Jupyter compatibility
     if 'ipykernel_launcher.py' in sys.argv[0] or 'colab_kernel_launcher.py' in sys.argv[0]:
         logging.info("Running in Jupyter/Colab mode. Using default arguments for main execution.")
-        parsed_args = parser.parse_args(args=[])  # Use defaults for main function
+        cli_parsed_args = parser.parse_args(args=[])  # Use defaults for main function
     else:
-        parsed_args = parser.parse_args()
+        cli_parsed_args = parser.parse_args()
 
     # Call the main execution function
-    main(parsed_args)
+    main(cli_parsed_args)
