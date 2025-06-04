@@ -346,7 +346,7 @@ def run_lr_experiment(learning_rate, num_epochs, model_architecture_fn,
     logging.info(f"Best val acc for LR {learning_rate}: {best_val_acc:.4f} at Epoch {best_epoch}")
     logging.info(f"Best model saved to: {path_best_model}")
 
-    plot_learning_curves(history, title_suffix=f" (LR={learning_rate}) ")
+    plot_learning_curves(history, title_suffix=f" (LR={learning_rate}) ", output_path_base=output_path_base)
 
     return history, best_val_acc, best_epoch
 
