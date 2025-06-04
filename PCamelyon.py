@@ -11,7 +11,7 @@ import torchvision
 import torch
 import datasets
 from datasets import load_dataset
-import transformers # If still used
+import transformers
 import sklearn
 import matplotlib
 import matplotlib.pyplot as plt
@@ -44,7 +44,7 @@ def display_or_save_plot(figure, filename_base, hpc_mode_flag, output_path_base)
     """
     Displays a Matplotlib plot or saves it to a file based on hpc_mode.
 
-    cli_args:
+    Args:
         figure (matplotlib.figure.Figure): The Matplotlib figure object to display/save.
                                            If None, uses plt.gcf() (get current figure).
         filename_base (str): The base name for the saved file (e.g., "learning_curves").
@@ -74,7 +74,7 @@ def count_labels(dataset):
 def show_samples(dataset, num_samples_per_class=5, hpc_mode_flag=False, output_path_base="."):
     """
     Efficiently displays a few random sample images from the dataset for each class.
-    cli_args:
+    Args:
         dataset (datasets.Dataset): A HuggingFace dataset split (e.g., pcam['train']).
         num_samples_per_class (int): Number of samples to show for each class.
         hpc_mode_flag (bool): If True, saves the plot. If False, shows the plot.
@@ -163,7 +163,7 @@ class PatchCamelyonDataset(Dataset):
 def train_one_epoch(model, dataloader, criterion, optimizer, device):
     """
     Train the model for one epoch.
-    cli_args:
+    Args:
         model (torch.nn.Module): The model to train.
         dataloader (DataLoader): DataLoader for the training data.
         criterion (torch.nn.Module): Loss function.
@@ -211,7 +211,7 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device):
 def validate_one_epoch(model, dataloader, criterion, device):
     """
     Validate the model for one epoch.
-    cli_args:
+    Args:
         model (torch.nn.Module): The model to validate.
         dataloader (DataLoader): DataLoader for the validation data.
         criterion (torch.nn.Module): Loss function.
@@ -250,7 +250,7 @@ def validate_one_epoch(model, dataloader, criterion, device):
 def plot_learning_curves(history, title_suffix="", hpc_mode_flag=False, output_path_base="."):
     """
     Plots the learning curves for training and validation loss and accuracy.
-    cli_args:
+    Args:
         history (dict): Dictionary containing 'train_loss', 'val_loss', 'train_acc', 'val_acc'.
         title_suffix (str): Suffix to add to the plot title.
         hpc_mode_flag (bool): If True, saves the plot instead of showing it.
@@ -287,10 +287,10 @@ def run_lr_experiment(learning_rate, num_epochs, model_architecture_fn,
     """
     Runs a training experiment for a given learning rate.
 
-    cli_args:
+    Args:
         learning_rate (float): The learning rate to use.
         num_epochs (int): Number of epochs to train.
-        model_architecture (callable): A function that returns an uninitialized model (e.g., models.resnet18).
+        model_architecture_fn (callable): A function that returns an uninitialized model (e.g., models.resnet18).
         train_loader (DataLoader): DataLoader for training data.
         val_loader (DataLoader): DataLoader for validation data.
         criterion_class (callable): The loss function class (e.g., nn.BCEWithLogitsLoss).
@@ -306,7 +306,7 @@ def run_lr_experiment(learning_rate, num_epochs, model_architecture_fn,
     logging.info(f"\n--- Running Experiment: {experiment_name} (LR: {learning_rate}) ---")
 
     # Re-initialize Model
-    model = model_architecture_fn(weights=models.ResNet18_Weights.IMAGENET1K_V1) # Assumes ResNet18 structure
+    model = model_architecture_fn()    # TODO: generalize for other architectures (e.g. pass `weights="IMAGENET1K_V1"` as an arg/config -> string enum value)
     num_ftrs = model.fc.in_features
     model.fc = nn.Linear(num_ftrs, 1)
     model = model.to(device)
@@ -441,7 +441,7 @@ def main(cli_args):
 
     # Set device preference based on config or CLI args
     device_preference = final_config['device_preference'].lower()
-    if device_preference == "mps" and torch.backends.mps.is_available() and not HPC_MODE:
+    if device_preference == "mps" and torch.backends.mps.is_available():
         device = torch.device("mps")
     elif device_preference == "cuda" and torch.cuda.is_available():
         device = torch.device("cuda")
@@ -450,7 +450,7 @@ def main(cli_args):
     else:       # fallback to best available device
         if torch.cuda.is_available():
             device = torch.device("cuda")
-        elif torch.backends.mps.is_available() and not HPC_MODE:
+        elif torch.backends.mps.is_available():
             device = torch.device("mps")
         else:
             device = torch.device("cpu")
@@ -458,7 +458,6 @@ def main(cli_args):
 
 
     # Initial Setup
-    os.makedirs(current_output_dir, exist_ok=True)  # Ensure base output dir exists
     warnings.filterwarnings("ignore", category=UserWarning)
     plt.style.use('ggplot')
     plt.rcParams['figure.figsize'] = (10, 6)
@@ -536,7 +535,10 @@ def main(cli_args):
     # Transformations
     train_transform = transforms.Compose([
         transforms.RandomHorizontalFlip(), transforms.RandomVerticalFlip(),
-        transforms.RandomRotation(degrees=90), transforms.ToTensor(),
+        transforms.RandomRotation(degrees=90),
+        transforms.RandomAffine(degrees=30, translate=(0.05, 0.05), scale=(0.95, 1.05), shear=5),   # Complements RandomRotation
+        transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.05),  # Add color jitter
+        transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
     val_test_transform = transforms.Compose([
@@ -569,7 +571,7 @@ def main(cli_args):
     model.fc = nn.Linear(num_ftrs, 1)
     model = model.to(device)
     criterion = nn.BCEWithLogitsLoss()
-    if final_config['optimizer_type'].lower() == 'adam':
+    if final_config['optimizer_type'].lower() == 'adam':        # TODO: make this more generic for other optimizers, could include parameters in config
         optimizer = optim.Adam(model.parameters(), lr=BASELINE_LEARNING_RATE_ARG)   # add more parameters later if needed
     elif final_config['optimizer_type'].lower() == 'sgd':
         optimizer = optim.SGD(model.parameters(), lr=BASELINE_LEARNING_RATE_ARG, momentum=0.9)  # add more parameters later if needed
@@ -608,7 +610,7 @@ def main(cli_args):
 
     logging.info("\nFinished Baseline Training.")
     logging.info(f"Best baseline val_acc: {best_val_accuracy_baseline:.4f} at Epoch {best_epoch_baseline}")
-    plot_learning_curves(history_baseline, title_suffix="Baseline", hpc_mode_flag=HPC_MODE,
+    plot_learning_curves(history_baseline, title_suffix="Baseline ", hpc_mode_flag=HPC_MODE,
                          output_path_base=current_output_dir)
 
     # --- Evaluation of the best baseline model on Test Set ---
@@ -724,7 +726,7 @@ if __name__ == "__main__":
     parser.add_argument(
         '--config',
         type=str,
-        default=None,  # No default config file, script can run with internal defaults or CLI cli_args
+        default=None,  # No default config file, script can run with internal defaults or CLI args
         help="Path to YAML configuration file. CLI arguments will override config file settings."
     )
     parser.add_argument(
