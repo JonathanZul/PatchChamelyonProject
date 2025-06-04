@@ -2,6 +2,7 @@
 # coding: utf-8
 
 # Imports
+import logging
 import argparse
 import os
 import sys
@@ -57,7 +58,7 @@ def display_or_save_plot(figure, filename_base, hpc_mode_flag, output_path_base)
         os.makedirs(plot_dir, exist_ok=True)
         save_path = os.path.join(plot_dir, f"{filename_base}.png")
         figure.savefig(save_path, bbox_inches='tight', dpi=300)
-        print(f"Plot saved to: {save_path}")
+        logging.info(f"Plot saved to: {save_path}")
         plt.close(figure)
     else:
         plt.show()
@@ -87,7 +88,7 @@ def show_samples(dataset, num_samples_per_class=5, hpc_mode_flag=False, output_p
         }
         target_labels_for_display = [False, True] # We want to display 'no_tumor' then 'tumor'
     except (KeyError, AttributeError):
-        print("Warning: Could not automatically determine class names. Using raw labels.")
+        logging.warning("Warning: Could not automatically determine class names. Using raw labels.")
         class_names_map = {False: "Label False", True: "Label True"}
         target_labels_for_display = [False, True]
 
@@ -109,7 +110,7 @@ def show_samples(dataset, num_samples_per_class=5, hpc_mode_flag=False, output_p
         label_specific_indices = [idx for idx, actual_label in enumerate(all_labels) if actual_label == label_to_display]
 
         if not label_specific_indices:
-            print(f"No samples found for label: {class_names_map[label_to_display]}")
+            logging.info(f"No samples found for label: {class_names_map[label_to_display]}")
             for j in range(num_samples_per_class):
                 if i < axes.shape[0] and j < axes.shape[1]: # Check bounds
                     ax = axes[i, j]
@@ -133,7 +134,7 @@ def show_samples(dataset, num_samples_per_class=5, hpc_mode_flag=False, output_p
                 ax.set_title(f"{class_names_map[label_to_display]}", fontsize=10)
                 ax.axis('off')
             else: # Should not happen with correct subplot setup but good for safety
-                print(f"Warning: Axes index out of bounds for plot [{i},{j}]")
+                logging.warning(f"Warning: Axes index out of bounds for plot [{i},{j}]")
 
     plt.suptitle("Sample Images from Dataset", fontsize=14)
     plt.tight_layout(rect=(0, 0, 1, 0.96))
@@ -301,7 +302,7 @@ def run_lr_experiment(learning_rate, num_epochs, model_architecture_fn,
     Returns:
         tuple: (history, best_validation_accuracy, best_epoch_number)
     """
-    print(f"\n--- Running Experiment: {experiment_name} (LR: {learning_rate}) ---")
+    logging.info(f"\n--- Running Experiment: {experiment_name} (LR: {learning_rate}) ---")
 
     # Re-initialize Model
     model = model_architecture_fn(weights=models.ResNet18_Weights.IMAGENET1K_V1) # Assumes ResNet18 structure
@@ -320,7 +321,7 @@ def run_lr_experiment(learning_rate, num_epochs, model_architecture_fn,
     os.makedirs(model_dir, exist_ok=True)
     path_best_model = os.path.join(model_dir, f"pcam_resnet18_best_model_{experiment_name}.pth")
 
-    print(f"Starting training for {num_epochs} epochs...")
+    logging.info(f"Starting training for {num_epochs} epochs...")
     for epoch in range(num_epochs):
         current_epoch_num = epoch + 1
 
@@ -332,17 +333,17 @@ def run_lr_experiment(learning_rate, num_epochs, model_architecture_fn,
         history['val_loss'].append(val_loss)
         history['val_acc'].append(val_acc)
 
-        print(f"Epoch {current_epoch_num}/{num_epochs} | Train Loss: {train_loss:.4f}, Acc: {train_acc:.4f} | Val Loss: {val_loss:.4f}, Acc: {val_acc:.4f}")
+        logging.info(f"Epoch {current_epoch_num}/{num_epochs} | Train Loss: {train_loss:.4f}, Acc: {train_acc:.4f} | Val Loss: {val_loss:.4f}, Acc: {val_acc:.4f}")
 
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             best_epoch = current_epoch_num
             torch.save(model.state_dict(), path_best_model)
-            print(f"  🎉 New best model saved for {experiment_name}! Val Acc: {best_val_acc:.4f} at Epoch {best_epoch}")
+            logging.info(f"  🎉 New best model saved for {experiment_name}! Val Acc: {best_val_acc:.4f} at Epoch {best_epoch}")
 
-    print(f"\nFinished Training for LR={learning_rate}.")
-    print(f"Best val acc for LR {learning_rate}: {best_val_acc:.4f} at Epoch {best_epoch}")
-    print(f"Best model saved to: {path_best_model}")
+    logging.info(f"\nFinished Training for LR={learning_rate}.")
+    logging.info(f"Best val acc for LR {learning_rate}: {best_val_acc:.4f} at Epoch {best_epoch}")
+    logging.info(f"Best model saved to: {path_best_model}")
 
     plot_learning_curves(history, title_suffix=f" (LR={learning_rate}) ")
 
@@ -355,13 +356,32 @@ def main(args):
     HPC_MODE = (args.hpc_mode == 1)  # Set global HPC_MODE based on current run's args, change later
 
     # Initial Setup
+    os.makedirs(args.output_dir, exist_ok=True)  # Ensure base output dir exists
     warnings.filterwarnings("ignore", category=UserWarning)
     plt.style.use('ggplot')
     plt.rcParams['figure.figsize'] = (10, 6)
 
-    print(f"HPC Mode: {'Enabled' if HPC_MODE else 'Disabled'}")
-    print(f"Output directory for plots/models: {args.output_dir}")
-    os.makedirs(args.output_dir, exist_ok=True)  # Ensure base output dir exists
+    # Logging setup
+    log_format = "%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s"
+    log_file_path = os.path.join(args.output_dir, "training_run.log")
+
+    logging.basicConfig(
+        level=logging.INFO,  # Log INFO level and above (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+        format=log_format,
+        handlers=[
+            logging.FileHandler(log_file_path),  # Log to a file
+            logging.StreamHandler(sys.stdout)  # Log to console (stdout)
+        ]
+    )
+
+    logging.info("************************************************************")
+    logging.info("           Starting PatchCamelyon Training Script           ")
+    logging.info("************************************************************")
+    logging.info(f"Script arguments: {args}")
+    logging.info(f"HPC Mode: {'Enabled' if HPC_MODE else 'Disabled'}")
+    logging.info(f"Output directory for plots/models/logs: {args.output_dir}")
+    logging.info(f"Log file: {log_file_path}")
+
 
     # Determine device
     if torch.backends.mps.is_available() and not HPC_MODE:  # Prefer MPS for local Mac if not HPC
@@ -370,44 +390,43 @@ def main(args):
         device = torch.device("cuda")
     else:
         device = torch.device("cpu")
-    print(f"Using device: {device}")
+    logging.info(f"Using device: {device}")
 
-    # --- Phase 0 & 1: Dataset Loading and Initial Setup ---
-    print("\n--- Phase 0 & 1: Data Loading and Preparation ---")
+    logging.info("\n--- Phase 0 & 1: Data Loading and Preparation ---")
     try:
         pcam = load_dataset("1aurent/PatchCamelyon")
-        print("Successfully loaded PatchCamelyon dataset.")
+        logging.info("Successfully loaded PatchCamelyon dataset.")
     except Exception as e:
-        print(f"Error loading dataset: {e}")
+        logging.error(f"Error loading dataset: {e}")
+        logging.exception("Exception details:")
         return  # Exit if dataset fails to load
 
 
-    print("Dataset structure:")
-    print(pcam)
+    logging.info("Dataset structure:")
+    logging.info(pcam)
 
     # Calculate the total number of samples in the dataset and distribution across splits
     total_samples = sum(len(pcam[split]) for split in pcam)
-    print(f"\nTotal samples in the dataset: {total_samples}")
+    logging.info(f"\nTotal samples in the dataset: {total_samples}")
 
     # Check the available splits in the dataset
-    print("\nAvailable splits in the dataset:")
+    logging.info("\nAvailable splits in the dataset:")
     for split in pcam:
         split_samples = len(pcam[split])
-        print(f"  - {split}: {split_samples} samples - {split_samples / total_samples * 100:.2f}%")
+        logging.info(f"  - {split}: {split_samples} samples - {split_samples / total_samples * 100:.2f}%")
 
     # Check feature names and types
-    print("\nFeature names and types:")
+    logging.info("\nFeature names and types:")
     for split in pcam:
-        print(f"\n{split} split features:")
+        logging.info(f"\n{split} split features:")
         for feature_name, feature_type in pcam[split].features.items():
-            print(f"  - {feature_name}: {feature_type}")
+            logging.info(f"  - {feature_name}: {feature_type}")
 
     # Check the first few samples in the training set
-    print("\nFirst few samples in the training set:")
+    logging.info("\nFirst few samples in the training set:")
     for i in range(3):
-        print(f"Sample {i}:")
-        print(pcam['train'][i])
-        print()
+        logging.info(f"Sample {i}:")
+        logging.info(pcam['train'][i])
 
     # Check image dimensions, color channels, and label distribution.
 
@@ -417,21 +436,10 @@ def main(args):
     image = sample['image']
     label = sample['label']
 
-    print(f"\nFirst training sample image type: {type(image)}")
-    print(f"Image dimensions: {image.size} (width x height)")
-    print(f"Image mode (color channels): {image.mode}")
-    print(f"Label: {label}")
-
-    # get the first sample from the training set
-    sample = pcam['train'][0]
-
-    image = sample['image']
-    label = sample['label']
-
-    print(f"\nFirst training sample image type: {type(image)}")
-    print(f"Image dimensions: {image.size} (width x height)")
-    print(f"Image mode (color channels): {image.mode}")
-    print(f"Label: {label}")
+    logging.info(f"\nFirst training sample image type: {type(image)}")
+    logging.info(f"Image dimensions: {image.size} (width x height)")
+    logging.info(f"Image mode (color channels): {image.mode}")
+    logging.info(f"Label: {label}")
 
     # Class labels are binary (0 = False for no tumor, 1 = True for tumor).
 
@@ -480,7 +488,7 @@ def main(args):
                                  pin_memory=True)
 
     # --- Initial Model Training (Baseline) ---
-    print("\n--- Baseline Model Training ---")
+    logging.info("\n--- Baseline Model Training ---")
     LEARNING_RATE_ARG = 1e-4  # Make this an argument
     NUM_EPOCHS_ARG = 5  # Make this an argument
 
@@ -499,7 +507,7 @@ def main(args):
     os.makedirs(model_dir, exist_ok=True)
     path_best_baseline_model = os.path.join(model_dir, "pcam_resnet18_baseline_best.pth")
 
-    print(f"Starting baseline training for {NUM_EPOCHS_ARG} epochs...")
+    logging.info(f"Starting baseline training for {NUM_EPOCHS_ARG} epochs...")
     for epoch in range(NUM_EPOCHS_ARG):
         current_epoch_num = epoch + 1
         train_loss, train_acc = train_one_epoch(model, train_dataloader, criterion, optimizer, device)
@@ -510,31 +518,31 @@ def main(args):
         history_baseline['val_loss'].append(val_loss)
         history_baseline['val_acc'].append(val_acc)
 
-        print(
+        logging.info(
             f"Epoch {current_epoch_num}/{NUM_EPOCHS_ARG} Baseline | Train Loss: {train_loss:.4f}, Acc: {train_acc:.4f} | Val Loss: {val_loss:.4f}, Acc: {val_acc:.4f}")
 
         if val_acc > best_val_accuracy_baseline:
             best_val_accuracy_baseline = val_acc
             best_epoch_baseline = current_epoch_num
             torch.save(model.state_dict(), path_best_baseline_model)
-            print(
+            logging.info(
                 f"  🎉 New best baseline model saved! Val Acc: {best_val_accuracy_baseline:.4f} at Epoch {best_epoch_baseline}")
 
-    print("\nFinished Baseline Training.")
-    print(f"Best baseline val_acc: {best_val_accuracy_baseline:.4f} at Epoch {best_epoch_baseline}")
+    logging.info("\nFinished Baseline Training.")
+    logging.info(f"Best baseline val_acc: {best_val_accuracy_baseline:.4f} at Epoch {best_epoch_baseline}")
     plot_learning_curves(history_baseline, title_suffix="Baseline", hpc_mode_flag=HPC_MODE,
                          output_path_base=args.output_dir)
 
     # --- Evaluation of the best baseline model on Test Set ---
-    print("\n--- Evaluating Best Baseline Model on Test Set ---")
+    logging.info("\n--- Evaluating Best Baseline Model on Test Set ---")
     eval_model = models.resnet18(weights=None)  # Create a new instance for evaluation
     num_ftrs_eval = eval_model.fc.in_features
     eval_model.fc = nn.Linear(num_ftrs_eval, 1)
     try:
         eval_model.load_state_dict(torch.load(path_best_baseline_model, map_location=device))
-        print(f"Successfully loaded best baseline model from {path_best_baseline_model}")
+        logging.info(f"Successfully loaded best baseline model from {path_best_baseline_model}")
     except Exception as e:
-        print(f"Error loading best baseline model: {e}. Skipping test set evaluation for baseline.")
+        logging.info(f"Error loading best baseline model: {e}. Skipping test set evaluation for baseline.")
         return  # Or handle differently
 
     eval_model = eval_model.to(device)
@@ -560,12 +568,12 @@ def main(args):
     f1_test = f1_score(all_labels_test, all_predictions_test, zero_division=0)
     roc_auc_test = roc_auc_score(all_labels_test, all_probabilities_test)
 
-    print("\n--- Baseline Model Test Set Performance ---")
-    print(f"Accuracy:  {acc_test:.4f}")
-    print(f"Precision: {prec_test:.4f}");
-    print(f"Recall:    {rec_test:.4f}")
-    print(f"F1-score:  {f1_test:.4f}");
-    print(f"AUC-ROC:   {roc_auc_test:.4f}")
+    logging.info("\n--- Baseline Model Test Set Performance ---")
+    logging.info(f"Accuracy:  {acc_test:.4f}")
+    logging.info(f"Precision: {prec_test:.4f}");
+    logging.info(f"Recall:    {rec_test:.4f}")
+    logging.info(f"F1-score:  {f1_test:.4f}");
+    logging.info(f"AUC-ROC:   {roc_auc_test:.4f}")
 
     # Confusion Matrix Plot for Test Set (Baseline)
     cm_test = confusion_matrix(all_labels_test, all_predictions_test)
@@ -598,7 +606,7 @@ def main(args):
     display_or_save_plot(fig_roc_test, "roc_curve_baseline_test", HPC_MODE, args.output_dir)
 
     # --- Phase 2: LR Experiments ---
-    print("\n--- Phase 2: Learning Rate Experiments ---")
+    logging.info("\n--- Phase 2: Learning Rate Experiments ---")
     NUM_EPOCHS_LR_TUNING_ARG = 10  # Make this an argument
     lrs_to_test = [1e-3, 1e-5]  # Compare with your original 1e-4 (which was LEARNING_RATE_ARG)
 
@@ -623,11 +631,11 @@ def main(args):
         )
         lr_experiment_results[lr_val] = {'history': hist, 'best_val_acc': b_val_acc, 'best_epoch': b_epoch}
 
-    print("\n--- All LR Experiments Summary ---")
+    logging.info("\n--- All LR Experiments Summary ---")
     for lr_val, result in lr_experiment_results.items():
-        print(f"LR: {lr_val:.0e} -> Best Val Acc: {result['best_val_acc']:.4f} at Epoch {result['best_epoch']}")
+        logging.info(f"LR: {lr_val:.0e} -> Best Val Acc: {result['best_val_acc']:.4f} at Epoch {result['best_epoch']}")
 
-    print("\n--- Script Finished ---")
+    logging.info("\n--- Script Finished ---")
 
 
 # --- Entry point for the script ---
@@ -645,7 +653,7 @@ if __name__ == "__main__":
 
     # Conditional parsing for Jupyter compatibility
     if 'ipykernel_launcher.py' in sys.argv[0] or 'colab_kernel_launcher.py' in sys.argv[0]:
-        print("Running in Jupyter/Colab mode. Using default arguments for main execution.")
+        logging.info("Running in Jupyter/Colab mode. Using default arguments for main execution.")
         parsed_args = parser.parse_args(args=[])  # Use defaults for main function
     else:
         parsed_args = parser.parse_args()
